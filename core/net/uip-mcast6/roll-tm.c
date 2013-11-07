@@ -618,9 +618,10 @@ handle_timer(void *ptr)
         MCAST_PACKET_FREE(locmpptr);
       } else if(MCAST_PACKET_TTL(locmpptr) > 0) {
         /* Handle multicast transmissions */
-        if((SUPPRESSION_ENABLED(param) && MCAST_PACKET_MUST_SEND(locmpptr)) ||
-           (SUPPRESSION_DISABLED(param) &&
-            locmpptr->active < TRICKLE_ACTIVE(param))) {
+          if(((SUPPRESSION_ENABLED(param) && MCAST_PACKET_MUST_SEND(locmpptr)) ||
+             (SUPPRESSION_DISABLED(param))) &&
+             (locmpptr->active < TRICKLE_ACTIVE(param))) {
+
           PRINTF("ROLL TM: M=%u Periodic - Sending packet from Seed ", m);
           PRINT_SEED(&locmpptr->sw->seed_id);
           PRINTF(" seq %u\n", locmpptr->seq_val);
@@ -802,6 +803,8 @@ icmp_output()
   struct sequence_list_header *sl;
   uint8_t *buffer;
   uint16_t payload_len;
+  uint8_t count;
+  struct trickle_param *tparam;
 
   PRINTF("ROLL TM: ICMPv6 Out\n");
 
@@ -820,6 +823,7 @@ icmp_output()
       iterswptr--) {
     if(SLIDING_WINDOW_IS_USED(iterswptr) && iterswptr->count > 0) {
       memset(sl, 0, sizeof(struct sequence_list_header));
+      count = 0;
 #if ROLL_TM_SHORT_SEEDS
       sl->flags = SEQUENCE_LIST_S_BIT;
 #endif
@@ -838,18 +842,31 @@ icmp_output()
       payload_len += sizeof(struct sequence_list_header);
       for(locmpptr = &buffered_msgs[ROLL_TM_BUFF_NUM - 1];
           locmpptr >= buffered_msgs; locmpptr--) {
-        if(MCAST_PACKET_IS_USED(locmpptr)) {
-          if(locmpptr->sw == iterswptr) {
-            PRINTF(", %u", locmpptr->seq_val);
-            *buffer = (uint8_t)(locmpptr->seq_val >> 8);
-            buffer++;
-            *buffer = (uint8_t)(locmpptr->seq_val & 0xFF);
-            buffer++;
-          }
+
+          tparam = &t[SEQUENCE_LIST_GET_M(sl)];
+          if(MCAST_PACKET_IS_USED(locmpptr) &&
+            (locmpptr->active < TRICKLE_ACTIVE(tparam))){
+            if(locmpptr->sw == iterswptr) {
+              count++;
+              PRINTF(", %u", locmpptr->seq_val);
+              *buffer = (uint8_t)(locmpptr->seq_val >> 8);
+              buffer++;
+              *buffer = (uint8_t)(locmpptr->seq_val & 0xFF);
+              buffer++;
+            }
         }
       }
       PRINTF("\n");
-      payload_len += sl->seq_len * 2;
+      /*if count == 0 we don't need to send a payload
+       * in the ICMPV6 message
+       * */
+      sl->seq_len = count;
+      if(count == 0){
+        payload_len = 0;
+      }
+      else{
+        payload_len += sl->seq_len * 2;
+      }
       sl = (struct sequence_list_header *)buffer;
     }
   }
@@ -960,7 +977,7 @@ accept(uint8_t in)
 
   seq_val = lochbhmptr->seq_id_lsb;
   seq_val |= HBH_GET_SV_MSB(lochbhmptr) << 8;
-
+  PRINTF("ROLL TM: Seq Val = %u\n",seq_val);
   if(locswptr) {
     if(SEQ_VAL_IS_LT(seq_val, locswptr->lower_bound)) {
       /* Too old, drop */
@@ -1087,6 +1104,8 @@ roll_tm_icmp_input()
   uint16_t *seq_ptr;
   uint16_t *end_ptr;
   uint16_t val;
+  uint8_t m;
+  struct trickle_param *tparam;
 
 #if UIP_CONF_IPV6_CHECKS
   if(!uip_is_addr_link_local(&UIP_IP_BUF->srcipaddr)) {
@@ -1256,14 +1275,26 @@ roll_tm_icmp_input()
   PRINTF("ROLL TM: ICMPv6 In, Check our buffer\n");
   for(locmpptr = &buffered_msgs[ROLL_TM_BUFF_NUM - 1];
       locmpptr >= buffered_msgs; locmpptr--) {
-    if(MCAST_PACKET_IS_USED(locmpptr)) {
+
+
+    if(MCAST_PACKET_IS_USED(locmpptr)){
       locswptr = locmpptr->sw;
+
+
+      m = SLIDING_WINDOW_GET_M(locmpptr->sw);
+      tparam = &t[SLIDING_WINDOW_GET_M(locmpptr->sw)];
+      PRINTF("ROLL TM: m = %u, cmp = %u, %lu, %lu\n",m,
+            (locmpptr->active < TRICKLE_ACTIVE(tparam)),
+            locmpptr->active , TRICKLE_ACTIVE(tparam));
+
       PRINTF("ROLL TM: ICMPv6 In, ");
       PRINTF("Check %u, Seed L: %u, This L: %u Min L: %d\n",
              locmpptr->seq_val, SLIDING_WINDOW_IS_LISTED(locswptr),
              MCAST_PACKET_IS_LISTED(locmpptr), locswptr->min_listed);
-      if(!SLIDING_WINDOW_IS_LISTED(locswptr)) {
-        /* If a buffered packet's Seed ID was not listed */
+      if(!SLIDING_WINDOW_IS_LISTED(locswptr) &&
+        (locmpptr->active < TRICKLE_ACTIVE(tparam))) {
+        /* If a buffered packet's Seed ID was not listed and Tactive is
+         * less than corresponding setting*/
         PRINTF("ROLL TM: Inconsistency - Seed ID ");
         PRINT_SEED(&locswptr->seed_id);
         PRINTF(" was not listed\n");
@@ -1273,7 +1304,8 @@ roll_tm_icmp_input()
         /* This packet was not listed but a prior one was */
         if(!MCAST_PACKET_IS_LISTED(locmpptr) &&
            (locswptr->min_listed >= 0) &&
-           SEQ_VAL_IS_GT(locmpptr->seq_val, locswptr->min_listed)) {
+           SEQ_VAL_IS_GT(locmpptr->seq_val, locswptr->min_listed) &&
+           (locmpptr->active < TRICKLE_ACTIVE(tparam))) {
           PRINTF("ROLL TM: Inconsistency - ");
           PRINTF("Seq. %u was not listed but %u was\n",
                  locmpptr->seq_val, locswptr->min_listed);
