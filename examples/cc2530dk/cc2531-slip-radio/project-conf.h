@@ -43,6 +43,9 @@
 #define NETSTACK_CONF_NETWORK  slipnet_driver
 #define NETSTACK_CONF_FRAMER   no_framer
 
+/* So that the example will play nicely with 6LBR without any user config */
+#define IEEE802154_CONF_PANID   0xABCD
+
 #define CMD_CONF_OUTPUT        cc2531_slip_radio_cmd_output
 
 /*
