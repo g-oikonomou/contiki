@@ -68,7 +68,8 @@ leds_arch_get(void)
 void
 leds_arch_set(unsigned char leds)
 {
-  LED1_PIN = leds & 0x01;
+  /* Cast to unsigned int to prevent emission of a bit variable */
+  LED1_PIN = (unsigned char)(leds & 0x01);
 #if MODELS_CONF_CC2531_USB_STICK
   LED2_PIN = ((leds & 0x02) >> 1) ^ 0x01;
 #else
