@@ -26,29 +26,75 @@
 # SUCH DAMAGE.
 
 DOCDIR=../../doc
+DOXYGEN_LOG = doxygen.log
+DOXYGEN_OUTPUT_FILE = $(DOCDIR)/$(DOXYGEN_LOG)
 
-all: summary
+# We may be running locally, or we may be running on travis. If we are running
+# locally, set a correct value for TRAVIS_PULL_REQUEST
+ifeq ($(TRAVIS),)
+  TRAVIS_PULL_REQUEST=false
+endif
 
-doxygen:
-	@make -C $(DOCDIR) doxygen.log 2> doxygen.runerr > doxygen.runlog
+# If this is a job triggered by a PR, this will be the log that would get
+# generated if we merged the pull and then built docs
+# If this is a job triggered by a branch, this will be the log for the branch
+# This will always get built, including in local builds
+BRANCH_LOG = branch.log
 
-summary: doxygen
-	@( doxyerr=`cat doxyerrors.cnt`; curerr=`cat $(DOCDIR)/doxygen.log | grep ": warning: " | wc -l` ; delta=`expr $$curerr - $$doxyerr`;  \
-		if [ $$delta -lt 0 ] ; then  echo "doxygen: FAIL ಠ_ಠ\nCongratulations you fixed `expr $$delta \"*\" -1 ` of doxyen's warnings (old: $$doxyerr new: $$curerr). Please adjust regression-tests/00-doxygen/doxyerrors.cnt accordingly." > summary; fi ;\
-		if [ $$delta -gt 0 ] ; then  echo "doxygen: FAIL ಠ_ಠ\nYou increased the number of warnings caused by doxygen by $$delta (old: $$doxyerr new: $$curerr). Please fix these." > summary; fi ; \
-		if [ $$delta -eq 0 ] ; then  echo "doxygen: OK\nDoxygen found $$doxyerr errors" > summary ; fi ; \
-		if [ -s doxygen.runerr ] ; then \
-			echo "Runtime warnings:" >> summary; \
-			cat doxygen.runerr >> summary; \
-			echo >> summary; \
+# If this is a job triggered by a PR, this will be the doxygen log that would
+# be generated if we built docs for the most recent common ancestor between the
+# PR's branch and the PR's base.
+# This will not be built for travis jobs triggered by a branch update
+# This will not be built for local builds.
+BASE_LOG = base.log
+
+ADDED = added
+FIXED = fixed
+
+CLEAN_TARGETS = summary $(BRANCH_LOG) $(BASE_LOG) $(ADDED) $(FIXED)
+
+ifeq ($(TRAVIS_PULL_REQUEST),false)
+summary: $(BRANCH_LOG)
+	echo "Doxygen: OK" > $@
+	echo `wc -l < $<` "doxygen warnings" >> $@
+	cat $< >> $@
+else
+summary: $(ADDED) $(FIXED)
+	@( \
+		if [ -s $(ADDED) ] ; then \
+			echo "Doxygen: FAIL ಠ_ಠ" > $@; \
+			echo "Warnings added by this pull:" `wc -l < $(ADDED)` >> $@; \
+			cat $(ADDED) >> $@; \
+		else \
+			echo "Doxygen: OK" > $@; \
 		fi ; \
-		if [ -s $(DOCDIR)/doxygen.log ] ; then \
-			echo "Warnings:" >> summary; \
-			cat $(DOCDIR)/doxygen.log >> summary; \
+		if [ -s $(FIXED) ] ; then \
+			echo "Warnings fixed by this pull:" `wc -l < $(FIXED)` >> $@; \
+			cat $(FIXED) >> $@; \
 		fi ; \
-		cat summary \
 	)
+endif
 
+.PHONY: checkout-common-ancestor clean
+
+# Common rule for all logs
+%.log:
+	make -C $(DOCDIR) clean
+	make -C $(DOCDIR) CONTIKI_DOC_QUIET=YES $(DOXYGEN_LOG)
+	cat $(DOXYGEN_OUTPUT_FILE) | grep ": warning: " > $@
+
+# Additional pre-req for BRANCH_LOG, in order to enforce order
+$(BASE_LOG): checkout-common-ancestor
+
+$(ADDED): $(FIXED)
+	-diff $(BASE_LOG) $(BRANCH_LOG) | grep \> > $@
+	
+$(FIXED): $(BASE_LOG)
+	-diff $(BASE_LOG) $(BRANCH_LOG) | grep \< > $@
+
+checkout-common-ancestor: $(BRANCH_LOG)
+	git checkout -q `git merge-base HEAD $(TRAVIS_BRANCH)`
 
 clean:
-	@make -C $(DOCDIR) clean
+	rm -f $(CLEAN_TARGETS)
+	make -C $(DOCDIR) clean
