@@ -73,6 +73,10 @@ summary: $(ADDED) $(FIXED)
 			cat $(FIXED) >> $@; \
 		fi ; \
 	)
+
+# Some remote references derived from the pull number
+PR_HEAD_REFSPEC = refs/pull/$(TRAVIS_PULL_REQUEST)/head
+PR_LOCAL_REFSPEC = tmp/travis/pull/$(TRAVIS_PULL_REQUEST)
 endif
 
 .PHONY: checkout-common-ancestor clean
@@ -92,8 +96,16 @@ $(ADDED): $(FIXED)
 $(FIXED): $(BASE_LOG)
 	-diff $(BASE_LOG) $(BRANCH_LOG) | grep \< > $@
 
+# Travis cloned with --depth, therefore it only fetched the branch that is
+# pointed to by the remote's HEAD. If the remote's HEAD points to master, and
+# the pull is against master, then we are good. However, if the remote's HEAD
+# points to some branch and the pull is against a different branch, then we
+# need to fetch $(TRAVIS_BRANCH). We also fetch the pull's tip
+
 checkout-common-ancestor: $(BRANCH_LOG)
-	git checkout -q `git merge-base HEAD $(TRAVIS_BRANCH)`
+	git fetch origin +$(PR_HEAD_REFSPEC):$(PR_LOCAL_REFSPEC) +$(TRAVIS_BRANCH):
+	$(eval MERGE_BASE := $(shell git merge-base $(PR_LOCAL_REFSPEC) FETCH_HEAD))
+	git checkout -q $(MERGE_BASE)
 
 clean:
 	rm -f $(CLEAN_TARGETS)
