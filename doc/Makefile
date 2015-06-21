@@ -29,12 +29,12 @@ ifeq ($(HOST_OS),Windows)
   endif
 endif
 
-.PHONY: clean html pdf upload
+.PHONY: clean html pdf upload summary
 
-html: init doxygen.log
+html: init doxygen.log summary
 
 pdf: doclatex = YES
-pdf: init doxygen.log
+pdf: init doxygen.log summary
 	gmake -C latex refman.pdf
 
 init:
@@ -45,6 +45,8 @@ doxygen.log: docdirs = $(sort $(foreach dir,$(basedirs),${shell find ../${dir} -
 doxygen.log: docsrc = $(docdirs) $(foreach dir,$(docdirs),${shell find $(dir) -type f $(filetypes)}) $(manuals)
 doxygen.log:
 	@doxygen Doxyfile
+
+summary:
 	@echo "Done, errorlog follows:"
 	@echo ""
 	@touch doxygen.log
