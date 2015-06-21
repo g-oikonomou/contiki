@@ -12,6 +12,14 @@ export docsrc
 export doclatex	:= NO
 export docroot	:= ../
 
+# Setting CONTIKI_DOC_QUIET to YES will silence doxygen stdout
+# Example: make CONTIKI_DOC_QUIET=YES
+ifneq ($(CONTIKI_DOC_QUIET),YES)
+  CONTIKI_DOC_QUIET=NO
+endif
+
+export docquiet := $(CONTIKI_DOC_QUIET)
+
 # Get appropriate root for doxygen path cutoff
 ifeq ($(HOST_OS),Windows)
   # on windows need to convert cygwin path to windows path for doxygen
