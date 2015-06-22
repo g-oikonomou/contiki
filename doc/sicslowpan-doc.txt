@@ -101,7 +101,7 @@ the link-layer addresses.
 <b>Address Autoconfiguration</b><br>
 The address autoconfiguration mechanism also depends on the format of
 the link-layer address. The dependency is reflected in the 
-#uip_netif_addr_autoconf_set function in #uip-netif.c.
+uip_netif_addr_autoconf_set function in uip-netif.c.
 \code
 #if (UIP_LLADDR_LEN == 8)
   memcpy(ipaddr->u8 + 8, lladdr, UIP_LLADDR_LEN);
