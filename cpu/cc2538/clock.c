@@ -34,7 +34,7 @@
  *
  * \defgroup cc2538-clock cc2538 Clock
  *
- * Implementation of the clock module for the cc2538
+ * Implementation of the clock module for the cc2538 - test test test
  *
  * To implement the clock functionality, we use the SysTick peripheral on the
  * cortex-M3. We run the system clock at a configurable speed and set the 
