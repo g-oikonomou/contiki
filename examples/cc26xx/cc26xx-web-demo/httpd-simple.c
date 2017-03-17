@@ -257,10 +257,12 @@ struct httpd_state {
   struct psock sin, sout;
   int blen;
   const char **ptr;
-  const cc26xx_web_demo_sensor_reading_t *reading;
-  const page_t *page;
-  uip_ds6_route_t *r;
-  uip_ds6_nbr_t *nbr;
+  union {
+    const cc26xx_web_demo_sensor_reading_t *reading;
+    const page_t *page;
+    uip_ds6_route_t *r;
+    uip_ds6_nbr_t *nbr;
+  } payload;
   httpd_simple_script_t script;
   int content_length;
   int tmp_buf_len;
@@ -400,15 +402,18 @@ PT_THREAD(generate_top_matter(struct httpd_state *s, const char *title,
   PT_WAIT_THREAD(&s->top_matter_pt,
                  enqueue_chunk(s, 0, SECTION_OPEN "<p>"));
 
-  s->page = list_head(pages_list);
+  s->payload.page = list_head(pages_list);
   PT_WAIT_THREAD(&s->top_matter_pt,
                  enqueue_chunk(s, 0, "[ <a href=\"%s\">%s</a> ]",
-                               s->page->filename, s->page->title));
+                               s->payload.page->filename,
+                               s->payload.page->title));
 
-  for(s->page = s->page->next; s->page != NULL; s->page = s->page->next) {
+  for(s->payload.page = s->payload.page->next; s->payload.page != NULL;
+      s->payload.page = s->payload.page->next) {
     PT_WAIT_THREAD(&s->top_matter_pt,
                    enqueue_chunk(s, 0, " | [ <a href=\"%s\">%s</a> ]",
-                                 s->page->filename, s->page->title));
+                                 s->payload.page->filename,
+                                 s->payload.page->title));
   }
 
 #if CC26XX_WEB_DEMO_MQTT_CLIENT
@@ -436,17 +441,18 @@ PT_THREAD(generate_index(struct httpd_state *s))
   PT_WAIT_THREAD(&s->generate_pt,
                  enqueue_chunk(s, 0, SECTION_OPEN "Neighbors" CONTENT_OPEN));
 
-  for(s->nbr = nbr_table_head(ds6_neighbors); s->nbr != NULL;
-      s->nbr = nbr_table_next(ds6_neighbors, s->nbr)) {
+  for(s->payload.nbr = nbr_table_head(ds6_neighbors); s->payload.nbr != NULL;
+      s->payload.nbr = nbr_table_next(ds6_neighbors, s->payload.nbr)) {
 
     PT_WAIT_THREAD(&s->generate_pt, enqueue_chunk(s, 0, "\n"));
 
     memset(ipaddr_buf, 0, IPADDR_BUF_LEN);
-    cc26xx_web_demo_ipaddr_sprintf(ipaddr_buf, IPADDR_BUF_LEN, &s->nbr->ipaddr);
+    cc26xx_web_demo_ipaddr_sprintf(ipaddr_buf, IPADDR_BUF_LEN,
+                                   &s->payload.nbr->ipaddr);
     PT_WAIT_THREAD(&s->generate_pt, enqueue_chunk(s, 0, "%s", ipaddr_buf));
 
     memset(ipaddr_buf, 0, IPADDR_BUF_LEN);
-    get_neighbour_state_text(ipaddr_buf, s->nbr->state);
+    get_neighbour_state_text(ipaddr_buf, s->payload.nbr->state);
     PT_WAIT_THREAD(&s->generate_pt, enqueue_chunk(s, 0, " %s", ipaddr_buf));
   }
 
@@ -470,25 +476,27 @@ PT_THREAD(generate_index(struct httpd_state *s))
   PT_WAIT_THREAD(&s->generate_pt,
                  enqueue_chunk(s, 0, SECTION_OPEN "Routes" CONTENT_OPEN));
 
-  for(s->r = uip_ds6_route_head(); s->r != NULL;
-      s->r = uip_ds6_route_next(s->r)) {
+  for(s->payload.r = uip_ds6_route_head(); s->payload.r != NULL;
+      s->payload.r = uip_ds6_route_next(s->payload.r)) {
     PT_WAIT_THREAD(&s->generate_pt, enqueue_chunk(s, 0, "\n"));
 
     memset(ipaddr_buf, 0, IPADDR_BUF_LEN);
-    cc26xx_web_demo_ipaddr_sprintf(ipaddr_buf, IPADDR_BUF_LEN, &s->r->ipaddr);
+    cc26xx_web_demo_ipaddr_sprintf(ipaddr_buf, IPADDR_BUF_LEN,
+                                   &s->payload.r->ipaddr);
     PT_WAIT_THREAD(&s->generate_pt, enqueue_chunk(s, 0, "%s", ipaddr_buf));
 
     PT_WAIT_THREAD(&s->generate_pt,
-                   enqueue_chunk(s, 0, " / %u via ", s->r->length));
+                   enqueue_chunk(s, 0, " / %u via ", s->payload.r->length));
 
     memset(ipaddr_buf, 0, IPADDR_BUF_LEN);
     cc26xx_web_demo_ipaddr_sprintf(ipaddr_buf, IPADDR_BUF_LEN,
-                                   uip_ds6_route_nexthop(s->r));
+                                   uip_ds6_route_nexthop(s->payload.r));
     PT_WAIT_THREAD(&s->generate_pt, enqueue_chunk(s, 0, "%s", ipaddr_buf));
 
     PT_WAIT_THREAD(&s->generate_pt,
                    enqueue_chunk(s, 0,
-                                 ", lifetime=%lus", s->r->state.lifetime));
+                                 ", lifetime=%lus",
+                                 s->payload.r->state.lifetime));
   }
 
   PT_WAIT_THREAD(&s->generate_pt, enqueue_chunk(s, 0,
@@ -498,12 +506,14 @@ PT_THREAD(generate_index(struct httpd_state *s))
   PT_WAIT_THREAD(&s->generate_pt,
                  enqueue_chunk(s, 0, SECTION_OPEN "Sensors" CONTENT_OPEN));
 
-  for(s->reading = cc26xx_web_demo_sensor_first();
-      s->reading != NULL; s->reading = s->reading->next) {
+  for(s->payload.reading = cc26xx_web_demo_sensor_first();
+      s->payload.reading != NULL;
+      s->payload.reading = s->payload.reading->next) {
     PT_WAIT_THREAD(&s->generate_pt,
-                   enqueue_chunk(s, 0, "\n%s = %s %s", s->reading->descr,
-                                 s->reading->publish ? s->reading->converted : "N/A",
-                                 s->reading->units));
+                   enqueue_chunk(s, 0, "\n%s = %s %s",
+                                 s->payload.reading->descr,
+                                 s->payload.reading->publish ? s->payload.reading->converted : "N/A",
+                                 s->payload.reading->units));
   }
 
   PT_WAIT_THREAD(&s->generate_pt,
@@ -547,25 +557,26 @@ PT_THREAD(generate_config(struct httpd_state *s))
   PT_WAIT_THREAD(&s->generate_pt,
                  enqueue_chunk(s, 0, "accept-charset=\"UTF-8\">"));
 
-  for(s->reading = cc26xx_web_demo_sensor_first();
-      s->reading != NULL; s->reading = s->reading->next) {
+  for(s->payload.reading = cc26xx_web_demo_sensor_first();
+      s->payload.reading != NULL;
+      s->payload.reading = s->payload.reading->next) {
     PT_WAIT_THREAD(&s->generate_pt,
                    enqueue_chunk(s, 0, "%s%s:%s%s", config_div_left,
-                                 s->reading->descr, config_div_close,
+                                 s->payload.reading->descr, config_div_close,
                                  config_div_right));
 
     PT_WAIT_THREAD(&s->generate_pt,
                    enqueue_chunk(s, 0, "<input type=\"radio\" value=\"1\" "));
     PT_WAIT_THREAD(&s->generate_pt,
                    enqueue_chunk(s, 0, "title=\"On\" name=\"%s\"%s>",
-                                 s->reading->form_field,
-                                 s->reading->publish ? " Checked" : ""));
+                                 s->payload.reading->form_field,
+                                 s->payload.reading->publish ? " Checked" : ""));
     PT_WAIT_THREAD(&s->generate_pt,
                    enqueue_chunk(s, 0, "<input type=\"radio\" value=\"0\" "));
     PT_WAIT_THREAD(&s->generate_pt,
                    enqueue_chunk(s, 0, "title=\"Off\" name=\"%s\"%s>%s",
-                                 s->reading->form_field,
-                                 s->reading->publish ? "" : " Checked",
+                                 s->payload.reading->form_field,
+                                 s->payload.reading->publish ? "" : " Checked",
                                  config_div_close));
   }
 
